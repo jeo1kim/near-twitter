@@ -6,6 +6,54 @@ import { Message, ContributionTracker, Vector } from "./models"
 const CONTRIBUTION_SAFETY_LIMIT: u128 = u128.mul(ONE_NEAR, u128.from(5));
 
 @nearBindgen
+export class DashboardContract {
+  private owner: AccountId
+  private publicMessageBoard: Vector<Post> = new Vector<Post>("p")
+  private contributions: ContributionTracker = new ContributionTracker()
+
+  constructor(owner: AccountId) {
+    this.owner = owner
+  }
+
+  @mutateState()
+  postPublicMessage(message: string): bool {
+
+    // guard against too much money being deposited to this account in beta
+    const deposit = Context.attachedDeposit
+    this.assert_financial_safety_limits(deposit)    
+
+    assert(message.length > 0, "Message cannot be empty")
+    assert(message.length < Message.max_length(), "Message is too long, must be less than " + Post.max_length)
+
+    let post = new Post(message)
+
+    // charge the money. 
+    const to_self = Context.contractName
+    const to_owner = ContractPromiseBatch.create(this.owner)
+
+    // TODO calculate word count * near token
+    // transfer earnings to owner then confirm transfer complete
+    const promise = to_owner.transfer(post.fee)
+    promise.then(to_self).function_call("on_transfer_complete", '{}', u128.Zero, XCC_GAS)
+    
+    this.publicMessageBoard.pushBack
+    return true
+  }
+
+  private assert_owner(): void {
+    const caller = Context.predecessor
+    assert(this.owner == caller, "Only the owner of this contract may call this method")
+  }
+
+  private assert_financial_safety_limits(deposit: u128): void {
+    const new_total = u128.add(deposit, this.contributions.received)
+    assert(u128.le(deposit, CONTRIBUTION_SAFETY_LIMIT), "You are trying to attach too many NEAR Tokens to this call.  There is a safe limit while in beta of 5 NEAR")
+    assert(u128.le(new_total, CONTRIBUTION_SAFETY_LIMIT), "Maximum contributions reached.  Please call transfer() to continue receiving funds.")
+  }
+
+}
+
+@nearBindgen
 export class Contract {
   private owner: AccountId
   private allow_anonymous: bool
